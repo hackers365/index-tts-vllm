@@ -3,7 +3,8 @@ import os
 import asyncio
 import io
 import traceback
-from fastapi import FastAPI, Request, Response
+import uuid
+from fastapi import FastAPI, Request, Response, File, UploadFile, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,28 @@ import soundfile as sf
 from indextts.infer_vllm import IndexTTS
 
 tts = None
+speaker_lock = asyncio.Lock()
+
+
+def _get_speaker_json_path() -> str:
+    current_file_path = os.path.abspath(__file__)
+    cur_dir = os.path.dirname(current_file_path)
+    return os.path.join(cur_dir, "assets/speaker.json")
+
+
+def _load_speaker_dict(speaker_path: str) -> dict:
+    if not os.path.exists(speaker_path):
+        return {}
+    with open(speaker_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_speaker_dict(speaker_path: str, speaker_dict: dict) -> None:
+    os.makedirs(os.path.dirname(speaker_path), exist_ok=True)
+    tmp_path = f"{speaker_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(speaker_dict, f, ensure_ascii=False, indent=4)
+    os.replace(tmp_path, speaker_path)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,9 +49,9 @@ async def lifespan(app: FastAPI):
 
     current_file_path = os.path.abspath(__file__)
     cur_dir = os.path.dirname(current_file_path)
-    speaker_path = os.path.join(cur_dir, "assets/speaker.json")
+    speaker_path = _get_speaker_json_path()
     if os.path.exists(speaker_path):
-        speaker_dict = json.load(open(speaker_path, 'r'))
+        speaker_dict = _load_speaker_dict(speaker_path)
 
         for speaker, audio_paths in speaker_dict.items():
             audio_paths_ = []
@@ -148,14 +171,104 @@ async def tts_api(request: Request):
 @app.get("/audio/voices")
 async def tts_voices():
     """ additional function to provide the list of available voices, in the form of JSON """
-    current_file_path = os.path.abspath(__file__)
-    cur_dir = os.path.dirname(current_file_path)
-    speaker_path = os.path.join(cur_dir, "assets/speaker.json")
+    speaker_path = _get_speaker_json_path()
     if os.path.exists(speaker_path):
-        speaker_dict = json.load(open(speaker_path, 'r'))
+        speaker_dict = _load_speaker_dict(speaker_path)
         return speaker_dict
     else:
         return []
+
+
+@app.post("/audio/clone")
+async def audio_clone(
+    voice: str = Form(default=""),
+    audio: list[UploadFile] = File(...),
+):
+    """Clone/register speaker voice with one or more reference audio files."""
+    try:
+        if not audio:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "error": "audio files are required"},
+            )
+
+        allowed_exts = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
+        voice = (voice or "").strip()
+
+        current_file_path = os.path.abspath(__file__)
+        cur_dir = os.path.dirname(current_file_path)
+        speaker_path = _get_speaker_json_path()
+
+        async with speaker_lock:
+            speaker_dict = _load_speaker_dict(speaker_path)
+
+            if not voice:
+                voice = f"voice_{uuid.uuid4().hex[:8]}"
+
+            existing_paths = speaker_dict.get(voice, [])
+            if not isinstance(existing_paths, list):
+                existing_paths = []
+
+            voice_dir = os.path.join(cur_dir, "assets", "speakers", voice)
+            os.makedirs(voice_dir, exist_ok=True)
+
+            added_paths = []
+            for idx, file in enumerate(audio):
+                _, ext = os.path.splitext(file.filename or "")
+                ext = ext.lower()
+                if ext not in allowed_exts:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "status": "error",
+                            "error": f"unsupported audio extension: {ext or '<empty>'}",
+                        },
+                    )
+
+                audio_bytes = await file.read()
+                if not audio_bytes:
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "status": "error",
+                            "error": f"empty audio file: {file.filename or idx}",
+                        },
+                    )
+
+                saved_name = f"{int(time.time() * 1000)}_{idx}_{uuid.uuid4().hex[:6]}{ext}"
+                abs_audio_path = os.path.join(voice_dir, saved_name)
+                with open(abs_audio_path, "wb") as out_f:
+                    out_f.write(audio_bytes)
+
+                rel_audio_path = os.path.relpath(abs_audio_path, cur_dir).replace("\\", "/")
+                added_paths.append(rel_audio_path)
+
+            updated_paths = existing_paths + added_paths
+            speaker_dict[voice] = updated_paths
+            _save_speaker_dict(speaker_path, speaker_dict)
+
+            global tts
+            abs_audio_paths = [os.path.join(cur_dir, p) for p in updated_paths]
+            tts.registry_speaker(voice, abs_audio_paths)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "voice": voice,
+                "added_files": added_paths,
+                "total_refs": len(updated_paths),
+            },
+        )
+    except Exception as ex:
+        tb_str = ''.join(traceback.format_exception(type(ex), ex, ex.__traceback__))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error": str(tb_str)
+            }
+        )
 
 
 
