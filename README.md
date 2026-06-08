@@ -25,6 +25,8 @@
 
 - **[2025-10-19]** 支持 qwen0.6bemo4-merge 的 vllm 推理
 
+- **[2026-03-03]** vllm 0.16.0 support for gpt2 inference
+
 ## TODO list
 - V2 api 的并发优化：目前只有 gpt2 模型的推理是并行的，其他模块均是串行，而其中 s2mel 的推理开销大（需要 DiT 迭代 25 步），十分影响并发性能
 
@@ -46,22 +48,21 @@ conda activate index-tts-vllm
 ```
 
 
-### 3. 安装 pytorch
-
-需要 pytorch 版本 2.8.0（对应 vllm 0.10.2），具体安装指令请参考：[pytorch 官网](https://pytorch.org/get-started/locally/)
-
-
-### 4. 安装依赖
+### 3. 安装依赖
+使用强制覆盖的方式进行依赖安装，规避vllm 0.16.0与descript-audiotools 0.7.2版本中protobuf的版本冲突问题。
 ```bash
-pip install -r requirements.txt
+pip install uv
+uv pip install -r requirements.txt -c overrides.txt
 ```
 
 
-### 5. 下载模型权重
+### 4. 下载模型权重
 
 #### 自动下载（推荐）
 
 选择对应版本的模型权重下载到 `checkpoints/` 路径下：
+
+**From ModelScope（国内推荐）：**
 
 ```bash
 # Index-TTS
@@ -74,9 +75,17 @@ modelscope download --model kusuriuri/Index-TTS-1.5-vLLM --local_dir ./checkpoin
 modelscope download --model kusuriuri/IndexTTS-2-vLLM --local_dir ./checkpoints/IndexTTS-2-vLLM
 ```
 
+**From Hugging Face：**
+
+```bash
+# IndexTTS-2
+huggingface-cli download ksuriuri/IndexTTS-2-vLLM --local-dir ./checkpoints/IndexTTS-2-vLLM
+```
+
 #### 手动下载
 
 - ModelScope：[Index-TTS](https://www.modelscope.cn/models/kusuriuri/Index-TTS-vLLM) | [IndexTTS-1.5](https://www.modelscope.cn/models/kusuriuri/Index-TTS-1.5-vLLM) | [IndexTTS-2](https://www.modelscope.cn/models/kusuriuri/IndexTTS-2-vLLM)
+- Hugging Face：[IndexTTS-2](https://huggingface.co/ksuriuri/IndexTTS-2-vLLM)
 
 #### 自行转换原权重（可选，不推荐）
 
@@ -86,7 +95,7 @@ modelscope download --model kusuriuri/IndexTTS-2-vLLM --local_dir ./checkpoints/
 bash convert_hf_format.sh /path/to/your/model_dir
 ```
 
-### 6. webui 启动！
+### 5. webui 启动！
 
 运行对应版本（第一次启动可能会久一些，因为要对 bigvgan 进行 cuda 核编译）：
 

@@ -25,6 +25,8 @@ Inference speed improvement (Index-TTS-v1/v1.5) on a single RTX 4090:
 
 - **[2025-10-19]** Supported vllm inference for qwen0.6bemo4-merge.
 
+- **[2026-03-03]** vllm 0.16.0 support for gpt2 inference
+
 ## TODO list
 - Concurrency optimization for V2 API: Currently, only the gpt2 model inference is parallel, while other modules run serially. The s2mel inference has a large overhead (requiring 25 DiT iterations), which significantly impacts concurrency performance.
 
@@ -46,22 +48,21 @@ conda activate index-tts-vllm
 ```
 
 
-### 3. Install PyTorch
-
-PyTorch version 2.8.0 is required (corresponding to vllm 0.10.2). For specific installation instructions, please refer to the [PyTorch official website](https://pytorch.org/get-started/locally/).
-
-
-### 4. Install dependencies
+### 3. Install dependencies
+Install dependencies with forced overrides to resolve the protobuf version conflict between vllm 0.16.0 and descript-audiotools 0.7.2.
 ```bash
-pip install -r requirements.txt
+pip install uv
+uv pip install -r requirements.txt -c overrides.txt
 ```
 
 
-### 5. Download model weights
+### 4. Download model weights
 
 #### Automatic Download (Recommended)
 
 Download the corresponding version of the model weights to the `checkpoints/` directory:
+
+**From ModelScope (recommended for users in China):**
 
 ```bash
 # Index-TTS
@@ -74,9 +75,17 @@ modelscope download --model kusuriuri/Index-TTS-1.5-vLLM --local_dir ./checkpoin
 modelscope download --model kusuriuri/IndexTTS-2-vLLM --local_dir ./checkpoints/IndexTTS-2-vLLM
 ```
 
+**From Hugging Face:**
+
+```bash
+# IndexTTS-2
+huggingface-cli download ksuriuri/IndexTTS-2-vLLM --local-dir ./checkpoints/IndexTTS-2-vLLM
+```
+
 #### Manual Download
 
 - ModelScope: [Index-TTS](https://www.modelscope.cn/models/kusuriuri/Index-TTS-vLLM) | [IndexTTS-1.5](https://www.modelscope.cn/models/kusuriuri/Index-TTS-1.5-vLLM) | [IndexTTS-2](https://www.modelscope.cn/models/kusuriuri/IndexTTS-2-vLLM)
+- Hugging Face: [IndexTTS-2](https://huggingface.co/ksuriuri/IndexTTS-2-vLLM)
 
 #### Convert original weights yourself (Optional, not recommended)
 
@@ -86,7 +95,7 @@ You can use `convert_hf_format.sh` to convert the official weight files yourself
 bash convert_hf_format.sh /path/to/your/model_dir
 ```
 
-### 6. Launch the web UI!
+### 5. Launch the web UI!
 
 Run the corresponding version (the first launch may take longer due to CUDA kernel compilation for bigvgan):
 
